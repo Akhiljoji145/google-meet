@@ -16,11 +16,18 @@ Including another URLconf
 """
 
 from django.contrib import admin
+from django.http import HttpResponse
 from django.urls import path, include
 from django.views.generic import RedirectView
 
+
+def health(_request):
+    return HttpResponse("ok")
+
+
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("health/", health, name="health"),
     path("", RedirectView.as_view(pattern_name='dashboard', permanent=False), name='index'),
     path("auth/", include("core.urls")),
     path("meetings/", include("meetings.urls")),

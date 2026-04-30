@@ -1,0 +1,37 @@
+services:
+  - type: keyvalue
+    name: google-meet-redis
+    plan: free
+    region: singapore
+    ipAllowList: []
+    maxmemoryPolicy: noeviction
+
+  - type: web
+    name: google-meet-web
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: bash build.sh
+    startCommand: daphne -b 0.0.0.0 -p $PORT meeting_project.asgi:application
+    autoDeployTrigger: commit
+    healthCheckPath: /health/
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: google-meet-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: google-meet-redis
+          property: connectionString
+
+databases:
+  - name: google-meet-db
+    plan: free
+    region: singapore
+    databaseName: google_meet
+    user: google_meet
+    ipAllowList: []
