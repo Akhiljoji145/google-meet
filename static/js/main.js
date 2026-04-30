@@ -29,97 +29,104 @@ const rtcConfig = {
     ]
 };
 
-const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-const wsUrl = `${protocol}//${window.location.host}/ws/meeting/${ROOM_ID}/`;
-const socket = new WebSocket(wsUrl);
+let socket;
 
-socket.onopen = () => {
-    console.log("WebSocket connected!");
-    updateParticipantCount();
-    updateMediaButtons();
-    sendStatus('active');
-
+async function initializeRoom() {
     if (mediaState.requested) {
-        requestLocalMedia({ showSuccess: false });
+        await requestLocalMedia({ showSuccess: false });
+    } else {
+        localStream = new MediaStream();
+        localVideo.srcObject = localStream;
     }
-};
 
-socket.onclose = () => {
-    console.log("WebSocket disconnected!");
-    showToast("Connection lost.", true);
-};
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws/meeting/${ROOM_ID}/`;
+    socket = new WebSocket(wsUrl);
 
-socket.onerror = (event) => {
-    console.error("WebSocket error", event);
-};
+    socket.onopen = () => {
+        console.log("WebSocket connected!");
+        updateParticipantCount();
+        updateMediaButtons();
+        sendStatus('active');
+    };
 
-socket.onmessage = async (event) => {
-    const data = JSON.parse(event.data);
-    const type = data.type;
-    const senderChannel = data.channel_name || data.sender_channel;
+    socket.onclose = () => {
+        console.log("WebSocket disconnected!");
+        showToast("Connection lost.", true);
+    };
 
-    if (type === 'chat_message') {
-        appendChatMessage(data.username, data.message);
-    } else if (type === 'new_peer') {
-        addParticipant(data.username);
-        const peer = getOrCreatePeerConnection(senderChannel, data.username);
+    socket.onerror = (event) => {
+        console.error("WebSocket error", event);
+    };
 
-        try {
-            const offer = await peer.createOffer();
-            await peer.setLocalDescription(offer);
-            socket.send(JSON.stringify({
-                type: 'offer',
-                data: offer,
-                target: senderChannel
-            }));
-        } catch (error) {
-            console.error("Error creating offer:", error);
-        }
-    } else if (type === 'peer_left') {
-        removeParticipant(data.username);
-        if (peers[senderChannel]) {
-            peers[senderChannel].close();
-            delete peers[senderChannel];
-        }
-        removePeerVideo(senderChannel);
-    } else if (type === 'offer') {
-        addParticipant(data.username);
-        const peer = getOrCreatePeerConnection(senderChannel, data.username);
+    socket.onmessage = async (event) => {
+        const data = JSON.parse(event.data);
+        const type = data.type;
+        const senderChannel = data.channel_name || data.sender_channel;
 
-        try {
-            await peer.setRemoteDescription(new RTCSessionDescription(data.data));
-            const answer = await peer.createAnswer();
-            await peer.setLocalDescription(answer);
-            socket.send(JSON.stringify({
-                type: 'answer',
-                data: answer,
-                target: senderChannel
-            }));
-        } catch (error) {
-            console.error("Error handling offer:", error);
-        }
-    } else if (type === 'answer') {
-        const peer = peers[senderChannel];
-        if (peer) {
+        if (type === 'chat_message') {
+            appendChatMessage(data.username, data.message);
+        } else if (type === 'new_peer') {
+            addParticipant(data.username);
+            const peer = getOrCreatePeerConnection(senderChannel, data.username);
+
+            try {
+                const offer = await peer.createOffer();
+                await peer.setLocalDescription(offer);
+                socket.send(JSON.stringify({
+                    type: 'offer',
+                    data: offer,
+                    target: senderChannel
+                }));
+            } catch (error) {
+                console.error("Error creating offer:", error);
+            }
+        } else if (type === 'peer_left') {
+            removeParticipant(data.username);
+            if (peers[senderChannel]) {
+                peers[senderChannel].close();
+                delete peers[senderChannel];
+            }
+            removePeerVideo(senderChannel);
+        } else if (type === 'offer') {
+            addParticipant(data.username);
+            const peer = getOrCreatePeerConnection(senderChannel, data.username);
+
             try {
                 await peer.setRemoteDescription(new RTCSessionDescription(data.data));
+                const answer = await peer.createAnswer();
+                await peer.setLocalDescription(answer);
+                socket.send(JSON.stringify({
+                    type: 'answer',
+                    data: answer,
+                    target: senderChannel
+                }));
             } catch (error) {
-                console.error("Error setting remote description:", error);
+                console.error("Error handling offer:", error);
             }
-        }
-    } else if (type === 'ice_candidate') {
-        const peer = peers[senderChannel];
-        if (peer) {
-            try {
-                await peer.addIceCandidate(new RTCIceCandidate(data.data));
-            } catch (error) {
-                console.error("Error adding ice candidate:", error);
+        } else if (type === 'answer') {
+            const peer = peers[senderChannel];
+            if (peer) {
+                try {
+                    await peer.setRemoteDescription(new RTCSessionDescription(data.data));
+                } catch (error) {
+                    console.error("Error setting remote description:", error);
+                }
             }
+        } else if (type === 'ice_candidate') {
+            const peer = peers[senderChannel];
+            if (peer) {
+                try {
+                    await peer.addIceCandidate(new RTCIceCandidate(data.data));
+                } catch (error) {
+                    console.error("Error adding ice candidate:", error);
+                }
+            }
+        } else if (type === 'user_status') {
+            updateParticipantStatus(data.username, data.status);
         }
-    } else if (type === 'user_status') {
-        updateParticipantStatus(data.username, data.status);
-    }
-};
+    };
+}
 
 function loadMediaState() {
     try {
@@ -183,7 +190,9 @@ async function requestLocalMedia(options = {}) {
         mediaState.requested = true;
         updateMediaButtons();
         saveMediaState();
-        await syncLocalTracksToPeers();
+        if (socket && socket.readyState === WebSocket.OPEN) {
+            await syncLocalTracksToPeers();
+        }
 
         if (options.showSuccess !== false && (constraints.video || constraints.audio)) {
             showToast("Camera and microphone enabled.");
@@ -290,7 +299,7 @@ async function syncLocalTracksToPeers() {
 }
 
 async function renegotiatePeer(channelName, peer) {
-    if (socket.readyState !== WebSocket.OPEN || peer.signalingState !== 'stable') {
+    if (!socket || socket.readyState !== WebSocket.OPEN || peer.signalingState !== 'stable') {
         return;
     }
 
@@ -512,7 +521,7 @@ const IDLE_TIMEOUT = 30000;
 let isCurrentlyInactive = false;
 
 function sendStatus(status) {
-    if (socket.readyState === WebSocket.OPEN) {
+    if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({
             type: 'user_status',
             status: status
@@ -525,6 +534,9 @@ document.addEventListener('visibilitychange', () => {
         isCurrentlyInactive = true;
         sendStatus('inactive');
     } else {
+        if (isCurrentlyInactive && !IS_HOST) {
+            showToast("Warning: Your tab switching/inactivity was reported to the host.", true);
+        }
         isCurrentlyInactive = false;
         sendStatus('active');
         resetIdleTimer();
@@ -584,14 +596,14 @@ function updateParticipantStatus(username, status) {
         const indicator = el.querySelector('.status-indicator');
         if (status === 'inactive') {
             indicator.className = 'status-indicator status-inactive';
-            if (IS_HOST) {
+            if (IS_HOST && username !== USERNAME) {
                 const msg = `Student ${username} is inactive or switched tabs.`;
                 showToast(msg, true);
                 logAlert(msg, 'inactive');
             }
         } else {
             indicator.className = 'status-indicator status-active';
-            if (IS_HOST) {
+            if (IS_HOST && username !== USERNAME) {
                 const msg = `Student ${username} is active.`;
                 showToast(msg);
                 logAlert(msg, 'active');
@@ -617,3 +629,5 @@ function showToast(message, isError = false) {
 window.addEventListener('pagehide', () => {
     stopLocalTracks();
 });
+
+initializeRoom();
