@@ -33,6 +33,16 @@ let pollInterval;
 let lastMessageId = 0;
 let knownParticipants = new Set();
 knownParticipants.add(USERNAME);
+const iceCandidateQueue = {};
+
+function flushIceCandidates(channelName, peer) {
+    if (iceCandidateQueue[channelName]) {
+        for (const candidate of iceCandidateQueue[channelName]) {
+            peer.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => console.error(e));
+        }
+        delete iceCandidateQueue[channelName];
+    }
+}
 
 async function sendSignal(type, data = null, target = null) {
     const payload = {
@@ -106,6 +116,7 @@ function handlePeerLeft(username) {
             peer.close();
             delete peers[channelName];
             removePeerVideo(channelName);
+            delete iceCandidateQueue[channelName];
             break;
         }
     }
@@ -139,6 +150,7 @@ async function handleSignalMessage(data) {
             const answer = await peer.createAnswer();
             await peer.setLocalDescription(answer);
             sendSignal('answer', answer, senderChannel);
+            flushIceCandidates(senderChannel, peer);
         } catch (error) {
             console.error("Error handling offer:", error);
         }
@@ -147,18 +159,24 @@ async function handleSignalMessage(data) {
         if (peer) {
             try {
                 await peer.setRemoteDescription(new RTCSessionDescription(data.payload));
+                flushIceCandidates(senderChannel, peer);
             } catch (error) {
                 console.error("Error setting remote description:", error);
             }
         }
     } else if (type === 'ice_candidate') {
         const peer = peers[senderChannel];
-        if (peer) {
+        if (peer && peer.remoteDescription) {
             try {
                 await peer.addIceCandidate(new RTCIceCandidate(data.payload));
             } catch (error) {
                 console.error("Error adding ice candidate:", error);
             }
+        } else {
+            if (!iceCandidateQueue[senderChannel]) {
+                iceCandidateQueue[senderChannel] = [];
+            }
+            iceCandidateQueue[senderChannel].push(data.payload);
         }
     } else if (type === 'user_status') {
         updateParticipantStatus(data.sender, data.payload);

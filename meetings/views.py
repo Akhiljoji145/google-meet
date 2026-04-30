@@ -103,7 +103,7 @@ def poll_signals(request, room_id):
     messages = SignalingMessage.objects.filter(
         room=meeting,
         id__gt=last_id
-    ).exclude(sender=request.user)
+    ).exclude(sender=request.user).order_by('id')
 
     valid_messages = []
     max_id = last_id
