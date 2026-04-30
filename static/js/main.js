@@ -239,6 +239,13 @@ function createPeerConnection(channelName, username) {
         }
     };
 
+    peer.oniceconnectionstatechange = () => {
+        console.log(`ICE Connection State for ${channelName}: ${peer.iceConnectionState}`);
+        if (peer.iceConnectionState === 'failed' || peer.iceConnectionState === 'disconnected') {
+            showToast(`Connection to ${username} failed. Network firewall might be blocking it.`, true);
+        }
+    };
+
     peer.ontrack = (event) => {
         let videoContainer = document.getElementById(`video-${channelName}`);
         if (!videoContainer) {
@@ -247,9 +254,15 @@ function createPeerConnection(channelName, username) {
             videoContainer.className = 'video-container';
 
             const videoElement = document.createElement('video');
-            videoElement.autoplay = true;
             videoElement.playsInline = true;
             videoElement.srcObject = event.streams[0];
+            
+            videoElement.onloadedmetadata = () => {
+                videoElement.play().catch(e => {
+                    console.error("Autoplay blocked:", e);
+                    showToast("Click anywhere on the screen to allow video to play.", true);
+                });
+            };
 
             const label = document.createElement('div');
             label.className = 'video-label';
