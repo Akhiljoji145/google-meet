@@ -555,6 +555,29 @@ function resetIdleTimer() {
 
 resetIdleTimer();
 
+function logAlert(message, statusType) {
+    if (!IS_HOST) return;
+    const logContainer = document.getElementById('activity-log-messages');
+    if (!logContainer) return;
+
+    const el = document.createElement('div');
+    el.className = `activity-log-item ${statusType}`;
+    
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'time';
+    const now = new Date();
+    timeSpan.textContent = `[${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}]`;
+    
+    const msgSpan = document.createElement('span');
+    msgSpan.textContent = message;
+    
+    el.appendChild(timeSpan);
+    el.appendChild(msgSpan);
+    
+    logContainer.appendChild(el);
+    logContainer.scrollTop = logContainer.scrollHeight;
+}
+
 function updateParticipantStatus(username, status) {
     const el = document.getElementById(participantElementId(username));
     if (el) {
@@ -562,12 +585,16 @@ function updateParticipantStatus(username, status) {
         if (status === 'inactive') {
             indicator.className = 'status-indicator status-inactive';
             if (IS_HOST) {
-                showToast(`Student ${username} is inactive or switched tabs.`);
+                const msg = `Student ${username} is inactive or switched tabs.`;
+                showToast(msg, true);
+                logAlert(msg, 'inactive');
             }
         } else {
             indicator.className = 'status-indicator status-active';
             if (IS_HOST) {
-                showToast(`Student ${username} is active.`);
+                const msg = `Student ${username} is active.`;
+                showToast(msg);
+                logAlert(msg, 'active');
             }
         }
     }
