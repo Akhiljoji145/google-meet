@@ -1,0 +1,77 @@
+{% extends 'base.html' %}
+
+{% block title %}Dashboard | Django Meet{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="dashboard-header">
+        <h1>Welcome, {{ user.username }}!</h1>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2rem; margin-bottom: 3rem;">
+        
+        <!-- Create Meeting Card -->
+        <div class="glass-panel" style="padding: 2rem;">
+            <h3>Create a Meeting</h3>
+            <p style="color: var(--text-secondary); margin-bottom: 1.5rem; font-size: 0.875rem;">
+                Start a new meeting instantly and invite others.
+            </p>
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="create">
+                <button type="submit" class="btn btn-primary">Start New Meeting</button>
+            </form>
+        </div>
+
+        <!-- Join Meeting Card -->
+        <div class="glass-panel" style="padding: 2rem;">
+            <h3>Join a Meeting</h3>
+            <p style="color: var(--text-secondary); margin-bottom: 1.5rem; font-size: 0.875rem;">
+                Enter a meeting link or ID to join an existing session.
+            </p>
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="join">
+                <div class="form-group" style="display: flex; gap: 0.5rem;">
+                    <input type="text" name="room_id" class="form-control" placeholder="Enter Meeting ID" required>
+                    <button type="submit" class="btn btn-primary">Join</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <h3>Your Recent Meetings</h3>
+    <div class="glass-panel" style="margin-top: 1rem; overflow: hidden;">
+        {% if recent_meetings %}
+            <table style="width: 100%; border-collapse: collapse;">
+                <thead>
+                    <tr style="border-bottom: 1px solid var(--border-color); background: rgba(0,0,0,0.2);">
+                        <th style="padding: 1rem; text-align: left;">Meeting ID</th>
+                        <th style="padding: 1rem; text-align: left;">Created At</th>
+                        <th style="padding: 1rem; text-align: right;">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for m in recent_meetings %}
+                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                        <td style="padding: 1rem;"><code>{{ m.room_id }}</code></td>
+                        <td style="padding: 1rem; color: var(--text-secondary);">{{ m.created_at|date:"M d, Y H:i" }}</td>
+                        <td style="padding: 1rem; text-align: right; display: flex; gap: 0.5rem; justify-content: flex-end;">
+                            <a href="{% url 'room' m.room_id %}" class="btn btn-primary" style="padding: 0.4rem 0.8rem;">Re-join</a>
+                            <form method="post" action="{% url 'delete_meeting' m.room_id %}" style="margin: 0;" onsubmit="return confirm('Are you sure you want to delete this meeting?');">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-danger" style="padding: 0.4rem 0.8rem;">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <div style="padding: 2rem; text-align: center; color: var(--text-secondary);">
+                You haven't hosted any meetings yet.
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

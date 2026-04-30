@@ -1,0 +1,248 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Meeting Room | Django Meet{% endblock %}
+
+{% block extra_head %}
+<style>
+    /* Room specific styles */
+    .room-container {
+        display: flex;
+        height: calc(100vh - 70px);
+        overflow: hidden;
+    }
+    
+    .video-area {
+        flex: 1;
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .video-grid {
+        flex: 1;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 1rem;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    .video-container {
+        position: relative;
+        width: 100%;
+        padding-top: 56.25%; /* 16:9 Aspect Ratio */
+        background: var(--bg-secondary);
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+        border: 1px solid var(--border-color);
+    }
+    
+    .video-container video {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    .video-label {
+        position: absolute;
+        bottom: 10px;
+        left: 10px;
+        background: rgba(0,0,0,0.6);
+        padding: 2px 8px;
+        border-radius: var(--radius-sm);
+        font-size: 0.8rem;
+    }
+    
+    .controls-bar {
+        height: 80px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 1rem;
+        padding: 1rem;
+    }
+    
+    .control-btn {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        border: none;
+        background: var(--bg-secondary);
+        color: white;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.2rem;
+        transition: all 0.2s;
+        border: 1px solid var(--border-color);
+    }
+    
+    .control-btn:hover {
+        background: var(--bg-glass);
+    }
+    
+    .control-btn.active {
+        background: var(--danger-color);
+        border-color: var(--danger-color);
+    }
+    
+    .sidebar {
+        width: 320px;
+        background: var(--bg-secondary);
+        border-left: 1px solid var(--border-color);
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .sidebar-header {
+        padding: 1rem;
+        border-bottom: 1px solid var(--border-color);
+        font-weight: 600;
+        display: flex;
+        justify-content: space-between;
+    }
+    
+    .participant-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 1rem;
+    }
+    
+    .participant-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.5rem 0;
+        border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    
+    .status-indicator {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 8px;
+    }
+    
+    .status-active { background-color: var(--success-color); box-shadow: 0 0 5px var(--success-color); }
+    .status-inactive { background-color: var(--danger-color); box-shadow: 0 0 5px var(--danger-color); }
+
+    .chat-area {
+        height: 300px;
+        border-top: 1px solid var(--border-color);
+        display: flex;
+        flex-direction: column;
+    }
+
+    .chat-messages {
+        flex: 1;
+        padding: 1rem;
+        overflow-y: auto;
+        font-size: 0.875rem;
+    }
+
+    .chat-input-container {
+        padding: 0.5rem;
+        border-top: 1px solid var(--border-color);
+        display: flex;
+    }
+
+    .chat-input {
+        flex: 1;
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        color: white;
+        padding: 0.5rem;
+        border-radius: var(--radius-sm);
+        outline: none;
+    }
+
+    /* Toast Notification */
+    .toast-container {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        z-index: 1000;
+    }
+    .toast {
+        background: var(--danger-color);
+        color: white;
+        padding: 10px 20px;
+        border-radius: var(--radius-md);
+        margin-top: 10px;
+        box-shadow: var(--shadow-md);
+        opacity: 0;
+        transition: opacity 0.3s;
+    }
+    .toast.show {
+        opacity: 1;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="room-container">
+    <div class="video-area">
+        <div class="video-grid" id="video-grid">
+            <!-- Local Video -->
+            <div class="video-container">
+                <video id="local-video" autoplay muted playsinline></video>
+                <div class="video-label">{{ username }} (You)</div>
+            </div>
+            <!-- Remote videos will be appended here -->
+        </div>
+        
+        <div class="controls-bar">
+            <button class="control-btn" id="btn-toggle-mic" title="Toggle Microphone">🎤</button>
+            <button class="control-btn" id="btn-toggle-cam" title="Toggle Camera">📷</button>
+            <a href="{% url 'dashboard' %}" class="control-btn" style="background: var(--danger-color);" title="Leave Meeting">👋</a>
+        </div>
+    </div>
+    
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <span>Participants</span>
+            <span id="participant-count">1</span>
+        </div>
+        
+        <div class="participant-list" id="participant-list">
+            <!-- Local User -->
+            <div class="participant-item" id="participant-{{ username }}">
+                <div>
+                    <span class="status-indicator status-active"></span>
+                    {{ username }} (You) {% if is_host %}[Host]{% endif %}
+                </div>
+            </div>
+            <!-- Remote users will be appended here -->
+        </div>
+
+        <div class="chat-area">
+            <div class="sidebar-header" style="font-size: 0.9rem;">Chat</div>
+            <div class="chat-messages" id="chat-messages"></div>
+            <div class="chat-input-container">
+                <input type="text" id="chat-input" class="chat-input" placeholder="Type a message...">
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+
+{{ room_id|json_script:"room-name" }}
+{{ username|json_script:"user-name" }}
+{{ is_host|json_script:"is-host" }}
+
+<script>
+    const ROOM_ID = JSON.parse(document.getElementById('room-name').textContent);
+    const USERNAME = JSON.parse(document.getElementById('user-name').textContent);
+    const IS_HOST = JSON.parse(document.getElementById('is-host').textContent);
+    
+    // Will implement WebRTC and WebSockets in main.js
+</script>
+<script src="{% static 'js/main.js' %}"></script>
+{% endblock %}
