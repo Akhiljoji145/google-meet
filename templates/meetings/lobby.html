@@ -1,0 +1,343 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Join Classroom | SignalRoom{% endblock %}
+
+{% block extra_head %}
+<style>
+    .lobby-shell {
+        min-height: calc(100vh - 70px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem 1rem;
+    }
+
+    .lobby-grid {
+        width: 100%;
+        max-width: 1180px;
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+        gap: 1.25rem;
+    }
+
+    .lobby-panel {
+        padding: 1.5rem;
+    }
+
+    .preview-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .preview-header p,
+    .info-card p,
+    .status-note {
+        color: var(--text-secondary);
+        font-size: 0.92rem;
+    }
+
+    .preview-frame {
+        position: relative;
+        width: 100%;
+        padding-top: 56.25%;
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+        background:
+            radial-gradient(circle at top, rgba(99, 102, 241, 0.25), transparent 55%),
+            linear-gradient(135deg, rgba(22, 22, 24, 0.95), rgba(10, 10, 11, 0.98));
+        border: 1px solid var(--border-color);
+    }
+
+    .preview-frame video,
+    .preview-placeholder {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+    }
+
+    .preview-frame video {
+        object-fit: cover;
+    }
+
+    .preview-placeholder {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.75rem;
+        padding: 2rem;
+        text-align: center;
+        color: var(--text-secondary);
+    }
+
+    .preview-placeholder strong {
+        color: var(--text-primary);
+        font-size: 1.05rem;
+    }
+
+    .preview-label {
+        position: absolute;
+        left: 1rem;
+        bottom: 1rem;
+        padding: 0.3rem 0.7rem;
+        border-radius: var(--radius-full);
+        background: rgba(0, 0, 0, 0.55);
+        color: white;
+        font-size: 0.82rem;
+    }
+
+    .control-row {
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+    }
+
+    .device-btn {
+        min-width: 130px;
+        padding: 0.8rem 1rem;
+        border-radius: var(--radius-full);
+        border: 1px solid var(--border-color);
+        background: var(--bg-secondary);
+        color: white;
+        cursor: pointer;
+        font-weight: 600;
+    }
+
+    .device-btn.active {
+        background: var(--danger-color);
+        border-color: var(--danger-color);
+    }
+
+    .device-btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+    .join-btn {
+        width: 100%;
+        margin-top: 0.5rem;
+    }
+
+    .room-code {
+        display: inline-block;
+        margin-top: 0.5rem;
+        padding: 0.65rem 0.85rem;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border-color);
+        background: rgba(255, 255, 255, 0.03);
+        overflow-wrap: anywhere;
+    }
+
+    .info-stack {
+        display: grid;
+        gap: 1rem;
+    }
+
+    .info-card {
+        padding: 1.25rem;
+    }
+
+    .share-field {
+        margin-top: 1rem;
+    }
+
+    .share-label {
+        display: block;
+        color: var(--text-secondary);
+        font-size: 0.8rem;
+        margin-bottom: 0.35rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+    }
+
+    .share-row {
+        display: flex;
+        gap: 0.6rem;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .share-input {
+        flex: 1;
+        min-width: 0;
+        padding: 0.7rem 0.85rem;
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+    }
+
+    .permission-list {
+        display: grid;
+        gap: 0.75rem;
+        margin-top: 1rem;
+    }
+
+    .permission-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+
+    .status-badge {
+        border-radius: var(--radius-full);
+        padding: 0.3rem 0.7rem;
+        font-size: 0.8rem;
+        font-weight: 600;
+        border: 1px solid transparent;
+    }
+
+    .status-granted {
+        color: #b7f7dc;
+        background: rgba(16, 185, 129, 0.14);
+        border-color: rgba(16, 185, 129, 0.35);
+    }
+
+    .status-denied,
+    .status-unavailable {
+        color: #fecaca;
+        background: rgba(239, 68, 68, 0.14);
+        border-color: rgba(239, 68, 68, 0.35);
+    }
+
+    .status-prompt,
+    .status-pending {
+        color: #fde68a;
+        background: rgba(245, 158, 11, 0.14);
+        border-color: rgba(245, 158, 11, 0.35);
+    }
+
+    .toast-container {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        z-index: 1000;
+    }
+
+    .toast {
+        background: var(--danger-color);
+        color: white;
+        padding: 10px 20px;
+        border-radius: var(--radius-md);
+        margin-top: 10px;
+        box-shadow: var(--shadow-md);
+        opacity: 0;
+        transition: opacity 0.3s;
+    }
+
+    .toast.show {
+        opacity: 1;
+    }
+
+    @media (max-width: 960px) {
+        .lobby-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    @media (max-width: 640px) {
+        .device-btn {
+            width: 100%;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="lobby-shell">
+    <div class="lobby-grid">
+        <div class="glass-panel lobby-panel preview-panel">
+            <div class="preview-header">
+                <h2>Check your camera and microphone</h2>
+                <p>Enable media before entering the classroom. The browser will ask for the user's permission here, before joining the live meeting.</p>
+                <code class="room-code">{{ room_id }}</code>
+            </div>
+
+            <div class="preview-frame">
+                <video id="preview-video" autoplay muted playsinline></video>
+                <div class="preview-placeholder" id="preview-placeholder">
+                    <strong>Camera preview is off</strong>
+                    <span>Click "Enable camera and microphone" to preview devices before joining.</span>
+                </div>
+                <div class="preview-label">{{ username }}</div>
+            </div>
+
+            <div class="control-row">
+                <button type="button" class="btn btn-primary" id="btn-request-media">Enable camera and microphone</button>
+                <button type="button" class="device-btn" id="btn-toggle-mic" disabled>Mic on</button>
+                <button type="button" class="device-btn" id="btn-toggle-cam" disabled>Cam on</button>
+            </div>
+
+            <p class="status-note" id="media-status-note">
+                You can join without media, or enable it here and enter the room with your saved camera and microphone state.
+            </p>
+
+            <button type="button" class="btn btn-primary join-btn" id="btn-join-room">Join meeting</button>
+        </div>
+
+        <div class="info-stack">
+            <div class="glass-panel info-card">
+                <h3>Share the classroom link</h3>
+                <p>Send the code or invite link before you enter the live room.</p>
+
+                <div class="share-field">
+                    <span class="share-label">Classroom code</span>
+                    <div class="share-row">
+                        <input type="text" id="room-code" class="share-input" value="{{ room_id }}" readonly>
+                        <button type="button" class="btn btn-primary" data-copy-target="room-code">Copy code</button>
+                    </div>
+                </div>
+
+                <div class="share-field">
+                    <span class="share-label">Invite link</span>
+                    <div class="share-row">
+                        <input type="text" id="invite-link" class="share-input" value="{{ invite_link }}" readonly>
+                        <button type="button" class="btn btn-primary" data-copy-target="invite-link">Copy link</button>
+                    </div>
+                </div>
+
+                <div class="share-field">
+                    <button type="button" class="btn btn-primary" id="btn-share-invite">Share invite</button>
+                </div>
+            </div>
+
+            <div class="glass-panel info-card">
+                <h3>Permissions</h3>
+                <p>The camera and microphone belong to the user device, so the browser must ask permission directly. Hosting on PythonAnywhere or another server does not bypass that browser rule.</p>
+
+                <div class="permission-list">
+                    <div class="permission-item">
+                        <span>Microphone</span>
+                        <span class="status-badge status-prompt" id="mic-permission-status">Ask user</span>
+                    </div>
+                    <div class="permission-item">
+                        <span>Camera</span>
+                        <span class="status-badge status-prompt" id="camera-permission-status">Ask user</span>
+                    </div>
+                </div>
+
+                <p class="status-note">
+                    Use HTTPS in production. Browsers block camera and microphone access on insecure pages.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+
+{{ room_id|json_script:"room-name" }}
+{{ username|json_script:"user-name" }}
+{{ join_room_url|json_script:"join-room-url" }}
+
+<script>
+    const ROOM_ID = JSON.parse(document.getElementById('room-name').textContent);
+    const USERNAME = JSON.parse(document.getElementById('user-name').textContent);
+    const JOIN_ROOM_URL = JSON.parse(document.getElementById('join-room-url').textContent);
+</script>
+<script src="{% static 'js/lobby.js' %}"></script>
+{% endblock %}
