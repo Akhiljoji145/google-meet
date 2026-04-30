@@ -29,7 +29,27 @@ const rtcConfig = {
     ]
 };
 
-let socket;
+let pollInterval;
+let lastMessageId = 0;
+let knownParticipants = new Set();
+knownParticipants.add(USERNAME);
+
+async function sendSignal(type, data = null, target = null) {
+    const payload = {
+        type: type,
+        payload: data,
+        target: target
+    };
+    try {
+        await fetch(SEND_SIGNAL_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+    } catch (e) {
+        console.error("Error sending signal:", e);
+    }
+}
 
 async function initializeRoom() {
     if (mediaState.requested) {
@@ -39,93 +59,110 @@ async function initializeRoom() {
         localVideo.srcObject = localStream;
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/meeting/${ROOM_ID}/`;
-    socket = new WebSocket(wsUrl);
+    updateParticipantCount();
+    updateMediaButtons();
+    sendStatus('active');
+    
+    sendSignal('new_peer');
 
-    socket.onopen = () => {
-        console.log("WebSocket connected!");
-        updateParticipantCount();
-        updateMediaButtons();
-        sendStatus('active');
-    };
+    pollInterval = setInterval(pollSignals, 1500);
+}
 
-    socket.onclose = () => {
-        console.log("WebSocket disconnected!");
-        showToast("Connection lost.", true);
-    };
-
-    socket.onerror = (event) => {
-        console.error("WebSocket error", event);
-    };
-
-    socket.onmessage = async (event) => {
-        const data = JSON.parse(event.data);
-        const type = data.type;
-        const senderChannel = data.channel_name || data.sender_channel;
-
-        if (type === 'chat_message') {
-            appendChatMessage(data.username, data.message);
-        } else if (type === 'new_peer') {
-            addParticipant(data.username);
-            const peer = getOrCreatePeerConnection(senderChannel, data.username);
-
-            try {
-                const offer = await peer.createOffer();
-                await peer.setLocalDescription(offer);
-                socket.send(JSON.stringify({
-                    type: 'offer',
-                    data: offer,
-                    target: senderChannel
-                }));
-            } catch (error) {
-                console.error("Error creating offer:", error);
+async function pollSignals() {
+    try {
+        const response = await fetch(`${POLL_SIGNALS_URL}?last_id=${lastMessageId}`);
+        const data = await response.json();
+        
+        lastMessageId = data.last_id;
+        
+        const currentUsers = new Set(data.active_users);
+        
+        for (const user of currentUsers) {
+            if (!knownParticipants.has(user)) {
+                knownParticipants.add(user);
+                addParticipant(user);
             }
-        } else if (type === 'peer_left') {
-            removeParticipant(data.username);
-            if (peers[senderChannel]) {
-                peers[senderChannel].close();
-                delete peers[senderChannel];
-            }
-            removePeerVideo(senderChannel);
-        } else if (type === 'offer') {
-            addParticipant(data.username);
-            const peer = getOrCreatePeerConnection(senderChannel, data.username);
-
-            try {
-                await peer.setRemoteDescription(new RTCSessionDescription(data.data));
-                const answer = await peer.createAnswer();
-                await peer.setLocalDescription(answer);
-                socket.send(JSON.stringify({
-                    type: 'answer',
-                    data: answer,
-                    target: senderChannel
-                }));
-            } catch (error) {
-                console.error("Error handling offer:", error);
-            }
-        } else if (type === 'answer') {
-            const peer = peers[senderChannel];
-            if (peer) {
-                try {
-                    await peer.setRemoteDescription(new RTCSessionDescription(data.data));
-                } catch (error) {
-                    console.error("Error setting remote description:", error);
-                }
-            }
-        } else if (type === 'ice_candidate') {
-            const peer = peers[senderChannel];
-            if (peer) {
-                try {
-                    await peer.addIceCandidate(new RTCIceCandidate(data.data));
-                } catch (error) {
-                    console.error("Error adding ice candidate:", error);
-                }
-            }
-        } else if (type === 'user_status') {
-            updateParticipantStatus(data.username, data.status);
         }
-    };
+        
+        for (const user of knownParticipants) {
+            if (!currentUsers.has(user) && user !== USERNAME) {
+                knownParticipants.delete(user);
+                handlePeerLeft(user);
+            }
+        }
+
+        for (const msg of data.messages) {
+            await handleSignalMessage(msg);
+        }
+    } catch (e) {
+        console.error("Error polling:", e);
+    }
+}
+
+function handlePeerLeft(username) {
+    removeParticipant(username);
+    for (const [channelName, peer] of Object.entries(peers)) {
+        if (peer.username === username) {
+            peer.close();
+            delete peers[channelName];
+            removePeerVideo(channelName);
+            break;
+        }
+    }
+}
+
+async function handleSignalMessage(data) {
+    const type = data.type;
+    const senderChannel = data.sender;
+
+    if (type === 'chat_message') {
+        appendChatMessage(data.sender, data.payload);
+    } else if (type === 'new_peer') {
+        addParticipant(data.sender);
+        const peer = getOrCreatePeerConnection(senderChannel, data.sender);
+
+        try {
+            const offer = await peer.createOffer();
+            await peer.setLocalDescription(offer);
+            sendSignal('offer', offer, senderChannel);
+        } catch (error) {
+            console.error("Error creating offer:", error);
+        }
+    } else if (type === 'peer_left') {
+        handlePeerLeft(data.sender);
+    } else if (type === 'offer') {
+        addParticipant(data.sender);
+        const peer = getOrCreatePeerConnection(senderChannel, data.sender);
+
+        try {
+            await peer.setRemoteDescription(new RTCSessionDescription(data.payload));
+            const answer = await peer.createAnswer();
+            await peer.setLocalDescription(answer);
+            sendSignal('answer', answer, senderChannel);
+        } catch (error) {
+            console.error("Error handling offer:", error);
+        }
+    } else if (type === 'answer') {
+        const peer = peers[senderChannel];
+        if (peer) {
+            try {
+                await peer.setRemoteDescription(new RTCSessionDescription(data.payload));
+            } catch (error) {
+                console.error("Error setting remote description:", error);
+            }
+        }
+    } else if (type === 'ice_candidate') {
+        const peer = peers[senderChannel];
+        if (peer) {
+            try {
+                await peer.addIceCandidate(new RTCIceCandidate(data.payload));
+            } catch (error) {
+                console.error("Error adding ice candidate:", error);
+            }
+        }
+    } else if (type === 'user_status') {
+        updateParticipantStatus(data.sender, data.payload);
+    }
 }
 
 function loadMediaState() {
@@ -190,9 +227,10 @@ async function requestLocalMedia(options = {}) {
         mediaState.requested = true;
         updateMediaButtons();
         saveMediaState();
-        if (socket && socket.readyState === WebSocket.OPEN) {
-            await syncLocalTracksToPeers();
-        }
+        mediaState.requested = true;
+        updateMediaButtons();
+        saveMediaState();
+        await syncLocalTracksToPeers();
 
         if (options.showSuccess !== false && (constraints.video || constraints.audio)) {
             showToast("Camera and microphone enabled.");
@@ -227,15 +265,13 @@ function getOrCreatePeerConnection(channelName, username) {
 function createPeerConnection(channelName, username) {
     const peer = new RTCPeerConnection(rtcConfig);
 
+    peer.username = username;
+
     attachLocalTracks(peer);
 
     peer.onicecandidate = (event) => {
         if (event.candidate) {
-            socket.send(JSON.stringify({
-                type: 'ice_candidate',
-                data: event.candidate,
-                target: channelName
-            }));
+            sendSignal('ice_candidate', event.candidate, channelName);
         }
     };
 
@@ -312,18 +348,14 @@ async function syncLocalTracksToPeers() {
 }
 
 async function renegotiatePeer(channelName, peer) {
-    if (!socket || socket.readyState !== WebSocket.OPEN || peer.signalingState !== 'stable') {
+    if (peer.signalingState !== 'stable') {
         return;
     }
 
     try {
         const offer = await peer.createOffer();
         await peer.setLocalDescription(offer);
-        socket.send(JSON.stringify({
-            type: 'offer',
-            data: offer,
-            target: channelName
-        }));
+        sendSignal('offer', offer, channelName);
     } catch (error) {
         console.error("Error renegotiating peer connection:", error);
     }
@@ -464,10 +496,7 @@ camButton.addEventListener('click', async () => {
 chatInput.addEventListener('keypress', (event) => {
     if (event.key === 'Enter' && chatInput.value.trim() !== '') {
         const message = chatInput.value.trim();
-        socket.send(JSON.stringify({
-            type: 'chat_message',
-            message: message
-        }));
+        sendSignal('chat_message', message);
         chatInput.value = '';
     }
 });
@@ -534,12 +563,7 @@ const IDLE_TIMEOUT = 30000;
 let isCurrentlyInactive = false;
 
 function sendStatus(status) {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({
-            type: 'user_status',
-            status: status
-        }));
-    }
+    sendSignal('user_status', status);
 }
 
 document.addEventListener('visibilitychange', () => {
@@ -641,6 +665,10 @@ function showToast(message, isError = false) {
 
 window.addEventListener('pagehide', () => {
     stopLocalTracks();
+});
+
+window.addEventListener('beforeunload', () => {
+    navigator.sendBeacon(LEAVE_ROOM_URL);
 });
 
 initializeRoom();
